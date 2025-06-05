@@ -28,6 +28,10 @@ spark.read.format(
 
 # COMMAND ----------
 
+spark.readStream.table('marketplace.table_data_marketplace').display()
+
+# COMMAND ----------
+
 # DBTITLE 1,Seleciona o mostra os dados depois de importados
 # MAGIC %sql
 # MAGIC select * from marketplace.table_data_marketplace
@@ -68,6 +72,8 @@ spark.table(
 # COMMAND ----------
 
 # DBTITLE 1,Salva o arquivo no DBFS em formato csv
+user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('user').split('@')[0]
+
 spark.table(
   'marketplace.table_data_marketplace'
 ).groupBy(
@@ -82,7 +88,7 @@ spark.table(
 ).mode(
   'overwrite'
 ).csv(
-  '/FileStore/dados_marketplace_canal_youtube'
+  f'/FileStore/tables/{user}/dados_marketplace_canal_youtube'
 )
 
 # COMMAND ----------
@@ -146,3 +152,80 @@ spark.sql(
     select * from olist_order_items_dataset
   """
 ).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Etapa de Download
+
+# COMMAND ----------
+
+# DBTITLE 1,Metodo Bloqueado
+def generate_final_url(filename_output=None):
+  user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('user').split('@')[0]
+  directory = f'dbfs:/FileStore/tables/{filename_output}'
+  files = dbutils.fs.ls(directory)
+  for file in files:
+    filename = file.name
+    if filename.endswith(".csv"):
+      final_url = f'https://community.cloud.databricks.com/files/{filename_output}/{filename}?o=316934541180447'
+      return final_url
+
+generate_final_url('dados_marketplace_canal_youtube')
+
+# COMMAND ----------
+
+# DBTITLE 1,Metodo 1
+import base64
+def generate_final_url(filename_output=None):
+    user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('user').split('@')[0]
+    directory = f'dbfs:/FileStore/tables/{user}/{filename_output}'
+    files = dbutils.fs.ls(directory)
+    for file in files:
+        filename = file.name
+        if filename.endswith(".csv"):
+            dbutils.fs.cp(f"dbfs:/FileStore/tables/{user}/{filename_output}/{filename}", f"dbfs:/FileStore/tables/{user}/saidas/{filename_output}.csv")
+            rdd = sc.textFile(f"dbfs:/FileStore/tables/{user}/{filename_output}/{filename}")
+            csv_content="\n".join(rdd.collect())
+
+            base64_csv = base64.b64encode(csv_content.encode('utf-8')).decode()
+            download_link = f'<a download="{filename_output}.csv" href="data:file/csv;base64,{base64_csv}" target="_blank">Download CSV</a>'
+            displayHTML(download_link)
+
+generate_final_url('dados_marketplace_canal_youtube')
+
+# COMMAND ----------
+
+# DBTITLE 1,Metodo 2
+df_pandas = spark.table('marketplace.table_data_marketplace').toPandas()
+
+import pandas as pd
+from io import BytesIO
+import base64
+
+from io import BytesIO
+import zipfile
+import base64
+
+# Gerar CSV em memória
+csv_buffer = BytesIO()
+df_pandas.to_csv(csv_buffer, index=False)
+csv_buffer.seek(0)
+
+# Criar arquivo ZIP em memória
+zip_buffer = BytesIO()
+with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+    zip_file.writestr("dados_marketplace.csv", csv_buffer.getvalue())
+zip_buffer.seek(0)
+
+# Codificar o ZIP em base64
+b64_zip = base64.b64encode(zip_buffer.read()).decode()
+
+# Criar botão HTML para download
+download_link = f"""
+<a download="dados_marketplace.zip" href="data:application/zip;base64,{b64_zip}" target="_blank">
+  📦 Clique aqui para baixar o arquivo ZIP
+</a>
+"""
+
+displayHTML(download_link)
